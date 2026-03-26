@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lora-caption
+  namespace: default
+spec:
+  backoffLimit: 2
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: caption
+          image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
+          command: ["python", "/app/caption.py"]
+          env:
+            - name: VLM_API_URL
+              value: "http://YOUR_VLLM_SERVICE:8000/v1"   # <-- replace
+            # - name: VLM_MODEL_NAME
+            #   value: ""  # auto-detect if unset
+            - name: TRIGGER_WORD
+              value: "ohwx"
+            - name: IMAGE_DIR
+              value: "/data/dataset/images"
+            - name: CAPTION_DIR
+              value: "/data/dataset/images"
+          volumeMounts:
+            - name: training-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "1Gi"
+              cpu: "1"
+            limits:
+              memory: "4Gi"
+              cpu: "2"
+      volumes:
+        - name: training-data
+          persistentVolumeClaim:
+            claimName: lora-training-pvc

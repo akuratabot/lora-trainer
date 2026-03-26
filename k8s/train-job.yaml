@@ -1,0 +1,72 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: lora-train
+  namespace: default
+spec:
+  backoffLimit: 1
+  template:
+    spec:
+      restartPolicy: OnFailure
+      # Copy default configs from image to PVC if not already present.
+      # User can override by pre-populating /data/config/ on the PVC.
+      initContainers:
+        - name: init-config
+          image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
+          command:
+            - sh
+            - -c
+            - |
+              mkdir -p /data/config
+              for f in config.json multidatabackend.json user_prompt_library.json config.env; do
+                if [ ! -f "/data/config/$f" ]; then
+                  echo "Copying default $f to /data/config/"
+                  cp "/app/config/$f" "/data/config/$f"
+                else
+                  echo "Using existing /data/config/$f"
+                fi
+              done
+          volumeMounts:
+            - name: training-data
+              mountPath: /data
+      containers:
+        - name: train
+          image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
+          command:
+            - simpletuner
+            - train
+          # SimpleTuner discovers config at ./config/config.json relative to workingDir
+          workingDir: /data
+          env:
+            - name: TRAINING_NUM_PROCESSES
+              value: "1"
+            - name: TRAINING_NUM_MACHINES
+              value: "1"
+            - name: TRAINING_DYNAMO_BACKEND
+              value: "no"
+            - name: MIXED_PRECISION
+              value: "bf16"
+            - name: SIMPLETUNER_LOG_LEVEL
+              value: "INFO"
+            - name: PYTORCH_CUDA_ALLOC_CONF
+              value: "expandable_segments:True"
+            # Uncomment if using HuggingFace Hub for model download:
+            # - name: HF_TOKEN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: hf-token
+            #       key: token
+          volumeMounts:
+            - name: training-data
+              mountPath: /data
+          resources:
+            requests:
+              memory: "120Gi"
+              nvidia.com/gpu: "1"
+            limits:
+              memory: "128Gi"
+              nvidia.com/gpu: "1"
+      volumes:
+        - name: training-data
+          persistentVolumeClaim:
+            claimName: lora-training-pvc
