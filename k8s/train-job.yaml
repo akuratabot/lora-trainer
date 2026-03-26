@@ -12,7 +12,7 @@ spec:
       # User can override by pre-populating /data/config/ on the PVC.
       initContainers:
         - name: init-config
-          image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
+          image: YOUR_REGISTRY/qwen-lora-training:latest # <-- replace
           command:
             - sh
             - -c
@@ -31,10 +31,8 @@ spec:
               mountPath: /data
       containers:
         - name: train
-          image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
-          command:
-            - simpletuner
-            - train
+          image: YOUR_REGISTRY/qwen-lora-training:latest # <-- replace
+          command: ["simpletuner", "train"]
           # SimpleTuner discovers config at ./config/config.json relative to workingDir
           workingDir: /data
           env:
