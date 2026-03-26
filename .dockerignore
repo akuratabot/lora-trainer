@@ -1,5 +1,5 @@
 .git
+scripts/
 k8s/
-GUIDE.md
 docs/
 *.md

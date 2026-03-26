@@ -10,19 +10,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN pip install --no-cache-dir 'simpletuner[cuda13]' \
     --extra-index-url https://download.pytorch.org/whl/cu130
 
-# Install minimal dependencies for captioning script
-# (uses only stdlib: urllib, json, base64, pathlib -- no extra deps needed)
-
-# Copy captioning script
-COPY scripts/caption.py /app/caption.py
-RUN chmod +x /app/caption.py
-
-# Copy config files
+# Copy default config files (used by initContainer to seed PVC)
 COPY config/ /app/config/
 
-# Working directory for SimpleTuner
 WORKDIR /workspace
-
-# Default entrypoint: can be overridden per Job
-ENTRYPOINT ["python"]
-CMD ["/app/caption.py"]

@@ -5,34 +5,112 @@ generation with text-prompt control over pose, setting, and outfit.
 
 ## Prerequisites
 
+- Python 3.8+ (for the captioning script)
+- Access to an OpenAI-compatible VLM API (e.g. self-hosted vLLM)
 - K3s cluster with NVIDIA GPU node (GB10 / Blackwell)
 - NVIDIA device plugin and GPU drivers installed
 - Container registry accessible from the cluster
-- Self-hosted vLLM endpoint with a vision-language model
 
-## 1. Build the Container Image
+## Overview
+
+The workflow has two phases:
+
+1. **Local** -- Prepare your dataset: curate photos, auto-caption them, review/edit captions
+2. **Cluster** -- Push dataset to PVC, run SimpleTuner training as a K3s Job
+
+---
+
+## Phase 1: Local Dataset Preparation
+
+### 1.1 Collect Training Photos (40-80 images)
+
+| Category | Count | Description |
+|----------|-------|-------------|
+| Face closeups | 10-15 | Head and shoulders, various angles |
+| Upper body | 10-15 | Waist up, various poses |
+| Full body | 15-25 | Head to toe, standing/sitting/walking |
+| Various angles | 5-10 | Profile, 3/4, back |
+
+**Quality rules:**
+- Minimum 512x512, ideally 1024+ longest edge
+- Diverse lighting (indoor, outdoor, overcast, direct sun)
+- Diverse backgrounds (prevents background leaking into identity)
+- Diverse clothing (prevents outfit baking into identity)
+- No other people in frame
+- No heavy filters, watermarks, or text overlays
+
+Put all photos in a local directory (e.g. `./dataset/images/`).
+
+### 1.2 Auto-Caption Images
+
+The captioning script calls your VLM API to generate a `.txt` caption file
+alongside each image. No dependencies beyond Python stdlib.
 
 ```bash
-# Clone this repo
-git clone <this-repo-url>
-cd lora-trainer
+python scripts/caption.py \
+  --api-url http://your-vlm-server:8000/v1 \
+  --image-dir ./dataset/images \
+  --trigger ohwx
+```
 
-# Build for ARM64 (run on the GX10 or use buildx)
+Options:
+- `--api-url` -- Your vLLM endpoint (required)
+- `--image-dir` -- Directory containing your photos (default: `./dataset/images`)
+- `--trigger` -- Trigger word for the subject (default: `ohwx`)
+- `--model` -- Model name (auto-detected if not set)
+- `--force` -- Overwrite existing captions
+
+After captioning, each image will have a matching `.txt` file:
+```
+dataset/images/
+  photo_001.jpg
+  photo_001.txt   <-- auto-generated caption
+  photo_002.jpg
+  photo_002.txt
+  ...
+```
+
+### 1.3 Review and Edit Captions
+
+Open the `.txt` files and verify:
+- Every caption begins with "A photo of ohwx"
+- Physical descriptions are accurate and consistent across images
+- Pose, clothing, and setting descriptions vary appropriately
+
+Edit any captions that are inaccurate. This is the most important quality step.
+
+### 1.4 Download Regularization Images
+
+Download generic person photos to prevent the model from associating all
+person-related prompts with your subject:
+
+```bash
+pip install huggingface_hub[cli]
+huggingface-cli download bghira/pseudo-camera-10k \
+  --repo-type dataset \
+  --local-dir ./dataset/regularization/images
+```
+
+---
+
+## Phase 2: K3s Training
+
+### 2.1 Build the Container Image
+
+```bash
 docker build -t your-registry/qwen-lora-training:latest .
 docker push your-registry/qwen-lora-training:latest
 ```
 
-Update the `image:` field in both `k8s/caption-job.yaml` and `k8s/train-job.yaml`.
+Update the `image:` field in `k8s/train-job.yaml` (appears twice: initContainer and main container).
 
-## 2. Create the PVC
+### 2.2 Create the PVC
 
 ```bash
 kubectl apply -f k8s/pvc.yaml
 ```
 
-## 3. Populate the PVC
-
-Use a temporary pod or direct host access to populate the PVC:
+### 2.3 Populate the PVC
 
 ```bash
 # Start a helper pod
@@ -50,8 +128,11 @@ kubectl exec pvc-helper -- mkdir -p \
   /data/output \
   /data/cache
 
-# Copy your photos
-kubectl cp /path/to/your/photos/ pvc-helper:/data/dataset/images/
+# Copy your captioned photos (images + .txt captions)
+kubectl cp ./dataset/images/ pvc-helper:/data/dataset/images/
+
+# Copy regularization images
+kubectl cp ./dataset/regularization/images/ pvc-helper:/data/dataset/regularization/images/
 
 # Copy config files (optional -- the train Job's initContainer copies defaults
 # from the image if these don't exist on the PVC, but you can override here)
@@ -71,53 +152,13 @@ kubectl exec pvc-helper -- sh -c '
 '
 ```
 
-### Download regularization images
-
-```bash
-kubectl exec pvc-helper -- sh -c '
-  pip install huggingface_hub[cli] &&
-  huggingface-cli download bghira/pseudo-camera-10k \
-    --repo-type dataset \
-    --local-dir /data/dataset/regularization/images
-'
-```
-
 ### Clean up helper
 
 ```bash
 kubectl delete pod pvc-helper
 ```
 
-## 4. Run Captioning
-
-Make sure your vLLM pod is running, then update `VLM_API_URL` in
-`k8s/caption-job.yaml` and apply:
-
-```bash
-kubectl apply -f k8s/caption-job.yaml
-kubectl logs -f job/lora-caption
-```
-
-Wait for completion. Review a sample of generated captions:
-
-```bash
-kubectl run pvc-helper --image=busybox --restart=Never \
-  --overrides='{"spec":{"containers":[{"name":"helper","image":"busybox","command":["sleep","300"],"volumeMounts":[{"name":"data","mountPath":"/data"}]}],"volumes":[{"name":"data","persistentVolumeClaim":{"claimName":"lora-training-pvc"}}]}}'
-
-kubectl exec pvc-helper -- ls /data/dataset/images/*.txt
-kubectl exec pvc-helper -- cat /data/dataset/images/photo_001.txt
-kubectl delete pod pvc-helper
-```
-
-Verify:
-- Every image has a corresponding `.txt` caption
-- Captions begin with "A photo of ohwx"
-- Physical descriptions are accurate
-- Pose/clothing/setting vary between images
-
-Edit any captions that need correction before proceeding.
-
-## 5. Run Training
+### 2.4 Run Training
 
 **Scale down vLLM first** to free GPU memory:
 
@@ -136,7 +177,7 @@ Training takes approximately 2-4 hours for 3000 steps with 40-80 images.
 
 Monitor validation samples in `/data/output/` (check every ~250 steps).
 
-## 6. Retrieve Results
+### 2.5 Retrieve Results
 
 After training completes:
 
@@ -154,7 +195,9 @@ kubectl delete pod pvc-helper
 
 The LoRA weights are in `output/` as safetensors files.
 
-## 7. Inference
+---
+
+## Inference
 
 ### With diffusers
 
@@ -180,28 +223,11 @@ image = pipe(
 image.save("result.png")
 ```
 
-## Dataset Guidelines
+---
 
-### Training photos (40-80 images)
+## Tuning Parameters
 
-| Category | Count | Description |
-|----------|-------|-------------|
-| Face closeups | 10-15 | Head and shoulders, various angles |
-| Upper body | 10-15 | Waist up, various poses |
-| Full body | 15-25 | Head to toe, standing/sitting/walking |
-| Various angles | 5-10 | Profile, 3/4, back |
-
-**Quality rules:**
-- Minimum 512x512, ideally 1024+ longest edge
-- Diverse lighting (indoor, outdoor, overcast, direct sun)
-- Diverse backgrounds (prevents background leaking into identity)
-- Diverse clothing (prevents outfit baking into identity)
-- No other people in frame
-- No heavy filters, watermarks, or text overlays
-
-### Tuning Parameters
-
-If results are unsatisfactory, try:
+If results are unsatisfactory, edit `config/config.json` and re-run training:
 
 | Issue | Adjustment |
 |-------|------------|

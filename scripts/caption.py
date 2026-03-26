@@ -2,18 +2,23 @@
 """
 Auto-caption images for LoRA training via an OpenAI-compatible VLM API.
 
-Produces one .txt caption file per image with structured descriptions
-that separate identity (trigger word) from variable attributes.
+Run locally to generate .txt caption files alongside your training images.
+Captions use a structured format that separates identity (trigger word)
+from variable attributes (pose, clothing, setting).
 
-Environment variables:
-  VLM_API_URL   - Base URL of the vLLM endpoint (required)
-                  e.g. http://vlm-service.default.svc:8000/v1
-  VLM_MODEL_NAME - Model name for the API (default: auto-detect from /v1/models)
+Usage:
+  python scripts/caption.py --api-url http://localhost:8000/v1 --image-dir ./dataset/images
+  python scripts/caption.py --api-url http://localhost:8000/v1 --image-dir ./dataset/images --trigger ohwx
+
+Environment variables (fallbacks for CLI args):
+  VLM_API_URL    - Base URL of the vLLM endpoint
+  VLM_MODEL_NAME - Model name for the API (default: auto-detect)
   TRIGGER_WORD   - Trigger word for the subject (default: ohwx)
-  IMAGE_DIR      - Path to input images (default: /data/dataset/images)
-  CAPTION_DIR    - Path to write captions (default: /data/dataset/images)
+
+No dependencies beyond Python 3.8+ stdlib.
 """
 
+import argparse
 import base64
 import json
 import os
@@ -112,22 +117,62 @@ def caption_image(api_url: str, model_name: str, image_path: Path, trigger_word:
         return result["choices"][0]["message"]["content"].strip()
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Auto-caption images for LoRA training via a VLM API.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  %(prog)s --api-url http://localhost:8000/v1 --image-dir ./photos
+  %(prog)s --api-url http://my-server:8000/v1 --image-dir ./photos --trigger sks
+  %(prog)s --api-url http://my-server:8000/v1 --image-dir ./photos --force""",
+    )
+    parser.add_argument(
+        "--api-url",
+        default=os.environ.get("VLM_API_URL", ""),
+        help="Base URL of the vLLM endpoint (e.g. http://localhost:8000/v1). "
+        "Also reads VLM_API_URL env var.",
+    )
+    parser.add_argument(
+        "--model",
+        default=os.environ.get("VLM_MODEL_NAME", ""),
+        help="Model name for the API request. Auto-detected if not set. "
+        "Also reads VLM_MODEL_NAME env var.",
+    )
+    parser.add_argument(
+        "--trigger",
+        default=os.environ.get("TRIGGER_WORD", "ohwx"),
+        help="Trigger word for the subject (default: ohwx). "
+        "Also reads TRIGGER_WORD env var.",
+    )
+    parser.add_argument(
+        "--image-dir",
+        type=Path,
+        default=Path(os.environ.get("IMAGE_DIR", "./dataset/images")),
+        help="Path to input images (default: ./dataset/images). "
+        "Captions are written as .txt files in the same directory.",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Overwrite existing caption files.",
+    )
+    return parser.parse_args()
+
+
 def main():
-    api_url = os.environ.get("VLM_API_URL")
-    if not api_url:
-        print("ERROR: VLM_API_URL environment variable is required", file=sys.stderr)
+    args = parse_args()
+
+    if not args.api_url:
+        print("ERROR: --api-url is required (or set VLM_API_URL env var)", file=sys.stderr)
+        parser_help = "Run with --help for usage information."
+        print(parser_help, file=sys.stderr)
         sys.exit(1)
 
-    model_name = os.environ.get("VLM_MODEL_NAME", "")
-    trigger_word = os.environ.get("TRIGGER_WORD", "ohwx")
-    image_dir = Path(os.environ.get("IMAGE_DIR", "/data/dataset/images"))
-    caption_dir = Path(os.environ.get("CAPTION_DIR", "/data/dataset/images"))
+    image_dir = args.image_dir.resolve()
 
     if not image_dir.exists():
         print(f"ERROR: Image directory does not exist: {image_dir}", file=sys.stderr)
         sys.exit(1)
-
-    caption_dir.mkdir(parents=True, exist_ok=True)
 
     # Collect images
     images = sorted(
@@ -139,27 +184,35 @@ def main():
         sys.exit(1)
 
     print(f"Found {len(images)} images in {image_dir}")
+    print(f"Trigger word: {args.trigger}")
+    print(f"API: {args.api_url}")
 
     # Auto-detect model name if not set
+    model_name = args.model
     if not model_name:
-        model_name = detect_model_name(api_url)
+        model_name = detect_model_name(args.api_url)
         print(f"Auto-detected model: {model_name}")
+    else:
+        print(f"Model: {model_name}")
 
-    # Caption each image
+    print()
+
+    # Caption each image -- writes .txt alongside the image
     success = 0
+    skipped = 0
     failed = 0
     for i, img_path in enumerate(images, 1):
-        caption_path = caption_dir / f"{img_path.stem}.txt"
+        caption_path = img_path.with_suffix(".txt")
 
-        # Skip if caption already exists
-        if caption_path.exists():
+        # Skip if caption already exists (unless --force)
+        if caption_path.exists() and not args.force:
             print(f"[{i}/{len(images)}] SKIP (exists): {img_path.name}")
-            success += 1
+            skipped += 1
             continue
 
         try:
             print(f"[{i}/{len(images)}] Captioning: {img_path.name} ... ", end="", flush=True)
-            caption = caption_image(api_url, model_name, img_path, trigger_word)
+            caption = caption_image(args.api_url, model_name, img_path, args.trigger)
             caption_path.write_text(caption, encoding="utf-8")
             print(f"OK ({len(caption)} chars)")
             success += 1
@@ -167,7 +220,7 @@ def main():
             print(f"FAILED: {e}")
             failed += 1
 
-    print(f"\nDone: {success} captioned, {failed} failed, out of {len(images)} total")
+    print(f"\nDone: {success} captioned, {skipped} skipped, {failed} failed, out of {len(images)} total")
     if failed > 0:
         sys.exit(1)
 
