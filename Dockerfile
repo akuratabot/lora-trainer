@@ -13,4 +13,11 @@ RUN pip install --no-cache-dir 'simpletuner[cuda13]' \
 # Copy default config files (used by initContainer to seed PVC)
 COPY config/ /app/config/
 
+# Create non-root user for restricted namespace compatibility.
+# All writes go to the PVC mounted at /data, so /workspace is just a fallback.
+RUN groupadd -g 1000 trainer && \
+    useradd -u 1000 -g 1000 -m -s /bin/bash trainer && \
+    chown -R 1000:1000 /app
+USER 1000
+
 WORKDIR /workspace
