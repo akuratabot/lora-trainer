@@ -8,6 +8,13 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       # Copy default configs from image to PVC if not already present.
       # User can override by pre-populating /data/config/ on the PVC.
       initContainers:
@@ -26,12 +33,20 @@ spec:
                   echo "Using existing /data/config/$f"
                 fi
               done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           volumeMounts:
             - name: training-data
               mountPath: /data
       containers:
         - name: train
           image: YOUR_REGISTRY/qwen-lora-training:latest  # <-- replace
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           command:
             - simpletuner
             - train
