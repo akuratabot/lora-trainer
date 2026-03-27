@@ -13,13 +13,14 @@ This repo provides a K3s-deployable training pipeline for character-specific LoR
 
 ```
 scripts/caption.py           # Local captioning script (NOT in the container image)
-config/config.json           # SimpleTuner training hyperparameters
-config/multidatabackend.json # SimpleTuner dataset backend config
-config/user_prompt_library.json  # Validation prompts
-config/config.env            # SimpleTuner accelerate/env settings
+config/config.json           # SimpleTuner training hyperparameters  \
+config/multidatabackend.json # SimpleTuner dataset backend config      | Source of
+config/user_prompt_library.json  # Validation prompts                  | truth for
+config/config.env            # SimpleTuner accelerate/env settings    /  configmap.yaml
 Dockerfile                   # Training-only container (NGC PyTorch 25.11 + SimpleTuner)
-k8s/pvc.yaml                # PersistentVolumeClaim (130Gi, local-path)
-k8s/train-job.yaml          # K3s Job for SimpleTuner training
+k8s/pvc.yaml                 # PersistentVolumeClaim (130Gi, local-path)
+k8s/configmap.yaml           # ConfigMap: mounts all 4 config files into /data/config/ at runtime
+k8s/train-job.yaml           # K3s Job for SimpleTuner training
 GUIDE.md                     # Step-by-step usage guide
 ```
 
@@ -44,11 +45,12 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 - Installs SimpleTuner via `pip install 'simpletuner[cuda13]'`. Do not switch to `[cuda]` -- the `[cuda13]` extra is required for Blackwell.
 - `TORCH_CUDA_ARCH_LIST="10.0"` must stay set for sm_100 kernel compilation.
 - Runs as non-root (UID 1000) for restricted namespace compatibility. All runtime writes go to the PVC at `/data`.
-- Does NOT include `scripts/caption.py` -- captioning is local-only.
+- Does NOT include config files or `scripts/caption.py` -- configs are in the ConfigMap, captioning is local-only.
 
 ### K3s Manifests
+- `configmap.yaml` contains all 4 SimpleTuner config files as ConfigMap data. Edit this file to change training parameters -- no image rebuild needed.
+- `train-job.yaml` mounts the ConfigMap files into `/data/config/` via `subPath` volume mounts. There is no initContainer.
 - `train-job.yaml` runs under the `restricted` Pod Security Standard (non-root, drop all capabilities, seccomp RuntimeDefault).
-- The initContainer copies default configs from `/app/config/` in the image to `/data/config/` on the PVC, but only if they don't already exist. This lets users override configs on the PVC.
 - Training requires the full GPU and 128Gi memory. A co-located vLLM pod (40GB) must be scaled down before training starts.
 - `nvidia.com/gpu: 1` is the resource request. Do not change this.
 
@@ -56,20 +58,20 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 - `model_family` must be `qwen_image`, `model_flavour` must be `v1.0`.
 - `mixed_precision` must be `bf16`. fp16 does not work with Qwen-Image.
 - `base_model_precision` must be `no_change` (meaning: load the model as-is, no quantization). Do NOT use `bf16` here -- that value is not accepted by SimpleTuner; `no_change` is the correct way to express "full precision, no quantization".
-- `noise_scheduler` must be `flowmatch`. Qwen-Image uses flow matching, not DDPM.
+- `gradient_checkpointing` must be `false` -- SimpleTuner has a bug in the Qwen-Image gradient checkpointing path for batch_size > 1 that causes a "multiple values" TypeError. Disabled since 128GB unified memory makes it unnecessary.
 - `max_grad_norm: 0.01` is Qwen-Image-specific. Default values (1.0) cause instability.
 - All paths in config.json and multidatabackend.json reference `/data/...` (the PVC mount point inside the container).
 
 ## Making Changes
 
 ### Modifying training parameters
-Edit `config/config.json`. The key parameters to tune are `lora_rank`, `learning_rate`, `train_batch_size`, `max_train_steps`, and `flow_schedule_shift`. See GUIDE.md "Tuning Parameters" for guidance.
+Edit the `config.json` key in `k8s/configmap.yaml`, then `kubectl apply -f k8s/configmap.yaml`. No image rebuild needed. Also keep `config/config.json` in sync -- it is the source of truth that `configmap.yaml` was generated from.
 
 ### Modifying the dataset layout
-Edit `config/multidatabackend.json`. This is a JSON array of dataset backends. The subject images use `caption_strategy: "textfile"` (reads `.txt` files co-located with images). Regularization images use `caption_strategy: "instanceprompt"`.
+Edit the `multidatabackend.json` key in `k8s/configmap.yaml`. The subject images use `caption_strategy: "textfile"` (reads `.txt` files co-located with images). Regularization images use `caption_strategy: "instanceprompt"`.
 
 ### Modifying validation prompts
-Edit `config/user_prompt_library.json`. Keys are short names, values are full prompts. All should include the trigger word (`ohwx`).
+Edit the `user_prompt_library.json` key in `k8s/configmap.yaml`. Keys are short names, values are full prompts. All should include the trigger word (`ohwx`).
 
 ### Adding new K3s resources
 Place YAML files in `k8s/`. All pods must comply with the `restricted` Pod Security Standard: `runAsNonRoot`, `runAsUser: 1000`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, `seccompProfile: RuntimeDefault`.

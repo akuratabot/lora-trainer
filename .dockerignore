@@ -1,4 +1,5 @@
 .git
+config/
 scripts/
 k8s/
 docs/

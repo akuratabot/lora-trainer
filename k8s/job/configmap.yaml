@@ -1,0 +1,132 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: lora-training-config
+  namespace: default
+data:
+  config.json: |
+    {
+        "model_family": "qwen_image",
+        "model_flavour": "v1.0",
+        "model_type": "lora",
+        "pretrained_model_name_or_path": "/data/models/Qwen-Image-2512",
+        "base_model_precision": "no_change",
+        "mixed_precision": "bf16",
+        "lora_type": "standard",
+        "lora_rank": 64,
+        "lora_alpha": 64,
+        "learning_rate": 3e-5,
+        "lr_scheduler": "constant_with_warmup",
+        "lr_warmup_steps": 100,
+        "optimizer": "optimi-lion",
+        "train_batch_size": 4,
+        "gradient_checkpointing": false,
+        "max_train_steps": 3000,
+        "num_train_epochs": 0,
+        "max_grad_norm": 0.01,
+        "seed": 42,
+        "flow_schedule_shift": 1.73,
+        "resolution": 1024,
+        "resolution_type": "pixel_area",
+        "minimum_image_size": 0,
+        "caption_dropout_probability": 0.0,
+        "data_backend_config": "/data/config/multidatabackend.json",
+        "output_dir": "/shared/comfyui/models/loras",
+        "checkpoint_step_interval": 500,
+        "checkpoints_total_limit": 5,
+        "resume_from_checkpoint": "latest",
+        "ignore_final_epochs": true,
+        "disable_bucket_pruning": true,
+        "validation_steps": 250,
+        "validation_guidance": 4.0,
+        "validation_guidance_rescale": 0.0,
+        "validation_lycoris_strength": 1.0,
+        "validation_num_inference_steps": 30,
+        "validation_prompt": "A photo of ohwx standing against a white background, natural lighting",
+        "validation_prompt_library": false,
+        "validation_negative_prompt": "ugly, cropped, blurry, low-quality, deformed, disfigured",
+        "validation_resolution": "1024x1024",
+        "validation_seed": 42,
+        "num_eval_images": 4,
+        "report_to": "none",
+        "tracker_project_name": "qwen-character-lora",
+        "tracker_run_name": "ohwx-training",
+        "push_to_hub": false,
+        "push_checkpoints_to_hub": false,
+        "use_ema": false,
+        "vae_batch_size": 1,
+        "compress_disk_cache": false,
+        "disable_benchmark": true,
+        "skip_file_discovery": false
+    }
+
+  multidatabackend.json: |
+    [
+        {
+            "id": "subject-images",
+            "type": "local",
+            "instance_data_dir": "/data/dataset/images",
+            "caption_strategy": "textfile",
+            "crop": false,
+            "resolution": 1024,
+            "resolution_type": "pixel_area",
+            "minimum_image_size": 512,
+            "maximum_image_size": 1328,
+            "target_downsample_size": 1024,
+            "cache_dir_vae": "/data/cache/vae/subject",
+            "metadata_backend": "discovery",
+            "repeats": 20,
+            "is_regularisation_data": false,
+            "disabled": false,
+            "skip_file_discovery": ""
+        },
+        {
+            "id": "regularization-images",
+            "type": "local",
+            "instance_data_dir": "/data/dataset/regularization/images",
+            "caption_strategy": "instanceprompt",
+            "instance_prompt": "a photo of a person",
+            "crop": true,
+            "crop_style": "center",
+            "crop_aspect": "square",
+            "resolution": 1024,
+            "resolution_type": "pixel_area",
+            "minimum_image_size": 512,
+            "maximum_image_size": 1328,
+            "target_downsample_size": 1024,
+            "cache_dir_vae": "/data/cache/vae/regularization",
+            "metadata_backend": "discovery",
+            "repeats": 0,
+            "is_regularisation_data": true,
+            "disabled": false,
+            "skip_file_discovery": ""
+        },
+        {
+            "id": "text-embeds",
+            "type": "local",
+            "dataset_type": "text_embeds",
+            "default": true,
+            "cache_dir": "/data/cache/text/qwen_image",
+            "write_batch_size": 16,
+            "disabled": false
+        }
+    ]
+
+  config.env: |
+    export TRAINING_NUM_PROCESSES=1
+    export TRAINING_NUM_MACHINES=1
+    export TRAINING_DYNAMO_BACKEND=no
+    export MIXED_PRECISION=bf16
+    export SIMPLETUNER_LOG_LEVEL=INFO
+
+  user_prompt_library.json: |
+    {
+        "identity_check": "A photo of ohwx standing against a plain white background, arms at sides, looking directly at the camera, neutral expression, soft even studio lighting",
+        "pose_sitting": "A photo of ohwx sitting cross-legged on a wooden floor, hands resting on knees, relaxed expression, warm indoor lighting",
+        "pose_action": "A photo of ohwx running through a grassy park, mid-stride, energetic expression, bright daylight with dappled shadows",
+        "setting_urban": "A photo of ohwx standing on a busy city sidewalk at night, neon signs reflected on wet pavement, wearing a dark overcoat",
+        "setting_nature": "A photo of ohwx walking through a snowy pine forest at golden hour, breath visible in cold air, wearing a red winter jacket",
+        "outfit_formal": "A photo of ohwx wearing a tailored navy blue suit and white dress shirt, standing in a modern office with floor-to-ceiling windows",
+        "outfit_casual": "A photo of ohwx wearing a plain white t-shirt and jeans, sitting on a park bench, relaxed posture, sunny day",
+        "close_up": "A close-up photo of ohwx from the shoulders up, looking slightly to the left, gentle smile, soft natural window light"
+    }
