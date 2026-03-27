@@ -36,7 +36,7 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 ## Key Constraints
 
 ### caption.py
-- **Zero external dependencies.** Uses only Python stdlib (urllib, json, base64, pathlib, argparse). Do not add pip dependencies.
+- **Single external dependency:** `openai` (install with `pip install openai`). All other imports are stdlib.
 - Defaults to local paths (`./dataset/images`), not container paths.
 - Writes `.txt` caption files alongside images in the same directory (SimpleTuner `textfile` caption strategy requires this).
 
@@ -75,7 +75,7 @@ Place YAML files in `k8s/`. All pods must comply with the `restricted` Pod Secur
 
 ## Testing
 
-- **caption.py**: Can be tested locally against any OpenAI-compatible vision API endpoint. Create a temp directory with a test image and run `python scripts/caption.py --api-url <url> --image-dir <dir>`.
+- **caption.py**: Requires `pip install openai`. Test locally against any OpenAI-compatible vision API endpoint: `python scripts/caption.py --api-url <url> --image-dir <dir>`. For reasoning models (QwQ, Qwen3), add `--no-think`.
 - **JSON configs**: Validate with `python -c "import json; json.load(open('config/config.json'))"` (and similarly for the other JSON files).
 - **Dockerfile**: Build with `docker build .` (requires ARM64 host or buildx for cross-compilation). The NGC base image is ~15GB.
 - **K8s manifests**: Dry-run with `kubectl apply --dry-run=client -f k8s/train-job.yaml`.
@@ -84,6 +84,6 @@ Place YAML files in `k8s/`. All pods must comply with the `restricted` Pod Secur
 
 - Deploy or run training from this dev environment. Build and test only.
 - Change the base image without confirming ARM64 + Blackwell + CUDA 13.0.x compatibility.
-- Add dependencies to `scripts/caption.py`.
+- Add heavy dependencies to `scripts/caption.py` (only `openai` is allowed as an external dep).
 - Remove the non-root user from the Dockerfile or the security contexts from `train-job.yaml`.
 - Hardcode HuggingFace tokens or secrets into any file. Use K8s Secrets or env vars.

@@ -6,6 +6,8 @@ Run locally to generate .txt caption files alongside your training images.
 Captions use a structured format that separates identity (trigger word)
 from variable attributes (pose, clothing, setting).
 
+Requires: pip install openai
+
 Usage:
   python scripts/caption.py --api-url http://localhost:8000/v1 --image-dir ./dataset/images
   python scripts/caption.py --api-url http://localhost:8000/v1 --image-dir ./dataset/images --trigger ohwx
@@ -14,18 +16,19 @@ Environment variables (fallbacks for CLI args):
   VLM_API_URL    - Base URL of the vLLM endpoint
   VLM_MODEL_NAME - Model name for the API (default: auto-detect)
   TRIGGER_WORD   - Trigger word for the subject (default: ohwx)
-
-No dependencies beyond Python 3.8+ stdlib.
 """
 
 import argparse
 import base64
-import json
 import os
 import sys
 from pathlib import Path
-from urllib.request import Request, urlopen
-from urllib.error import URLError, HTTPError
+
+try:
+    from openai import OpenAI
+except ImportError:
+    print("ERROR: openai package required. Install with: pip install openai", file=sys.stderr)
+    sys.exit(1)
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tiff"}
 
@@ -48,55 +51,59 @@ Rules:
 - The physical trait description should be nearly identical across all images of the same person. Only pose, clothing, and setting should vary."""
 
 
-def encode_image_base64(image_path: Path) -> str:
+MIME_MAP = {
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".bmp": "image/bmp",
+    ".tiff": "image/tiff",
+}
+
+
+def encode_image_url(image_path: Path) -> str:
+    """Encode image as a base64 data URL."""
+    mime = MIME_MAP.get(image_path.suffix.lower(), "image/jpeg")
     with open(image_path, "rb") as f:
-        return base64.b64encode(f.read()).decode("utf-8")
+        b64 = base64.b64encode(f.read()).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
 
 
-def get_mime_type(image_path: Path) -> str:
-    ext = image_path.suffix.lower()
-    mime_map = {
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".png": "image/png",
-        ".webp": "image/webp",
-        ".bmp": "image/bmp",
-        ".tiff": "image/tiff",
-    }
-    return mime_map.get(ext, "image/jpeg")
-
-
-def detect_model_name(api_url: str) -> str:
-    """Auto-detect the model name from the /v1/models endpoint."""
-    url = f"{api_url.rstrip('/')}/models"
+def detect_model_name(client: OpenAI) -> str:
+    """Auto-detect the first available model from the API."""
     try:
-        req = Request(url, headers={"Content-Type": "application/json"})
-        with urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read().decode())
-            models = data.get("data", [])
-            if models:
-                return models[0]["id"]
-    except (URLError, HTTPError, KeyError, IndexError) as e:
-        print(f"Warning: could not auto-detect model name from {url}: {e}")
+        models = client.models.list()
+        if models.data:
+            return models.data[0].id
+    except Exception as e:
+        print(f"Warning: could not auto-detect model: {e}")
     return "default"
 
 
-def caption_image(api_url: str, model_name: str, image_path: Path, trigger_word: str) -> str:
+def caption_image(
+    client: OpenAI,
+    model_name: str,
+    image_path: Path,
+    trigger_word: str,
+    no_think: bool,
+) -> str:
     """Send an image to the VLM API and return the caption."""
-    b64 = encode_image_base64(image_path)
-    mime = get_mime_type(image_path)
+    image_url = encode_image_url(image_path)
 
-    payload = {
+    # For reasoning models, set a generous budget so thinking doesn't consume
+    # all tokens. For non-reasoning models, max_completion_tokens works the
+    # same as max_tokens.
+    kwargs = {
         "model": model_name,
         "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT.replace("{trigger_word}", trigger_word)},
+            {
+                "role": "system",
+                "content": SYSTEM_PROMPT.replace("{trigger_word}", trigger_word),
+            },
             {
                 "role": "user",
                 "content": [
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{mime};base64,{b64}"},
-                    },
+                    {"type": "image_url", "image_url": {"url": image_url}},
                     {
                         "type": "text",
                         "text": f"Describe this person in detail. Begin with 'A photo of {trigger_word}'.",
@@ -104,26 +111,41 @@ def caption_image(api_url: str, model_name: str, image_path: Path, trigger_word:
                 ],
             },
         ],
-        "max_tokens": 300,
+        "max_completion_tokens": 2048,
         "temperature": 0.3,
     }
 
-    url = f"{api_url.rstrip('/')}/chat/completions"
-    data = json.dumps(payload).encode("utf-8")
-    req = Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+    # If --no-think is set, ask the API to suppress reasoning output.
+    # vLLM supports this via chat_template_kwargs; other providers may use
+    # different mechanisms (e.g. reasoning_effort, thinking parameter).
+    if no_think:
+        kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False}
+        }
 
-    with urlopen(req, timeout=120) as resp:
-        result = json.loads(resp.read().decode())
-        choices = result.get("choices")
-        if not choices:
-            raise ValueError(f"API returned no choices: {json.dumps(result)[:200]}")
-        content = choices[0].get("message", {}).get("content")
-        if content is None:
+    response = client.chat.completions.create(**kwargs)
+
+    choice = response.choices[0]
+    content = choice.message.content
+
+    # If content is still null (reasoning model consumed everything, or refusal),
+    # check if there's usable text in the reasoning field.
+    if content is None:
+        # Try to access reasoning content if available
+        reasoning = getattr(choice.message, "reasoning", None) or getattr(
+            choice.message, "reasoning_content", None
+        )
+        if reasoning:
             raise ValueError(
-                f"API returned null content (possible refusal or empty response): "
-                f"{json.dumps(choices[0])[:200]}"
+                f"Model produced reasoning but no final content. "
+                f"The model may need --no-think, or a higher token budget. "
+                f"finish_reason={choice.finish_reason}"
             )
-        return content.strip()
+        raise ValueError(
+            f"API returned null content. finish_reason={choice.finish_reason}"
+        )
+
+    return content.strip()
 
 
 def parse_args():
@@ -133,6 +155,7 @@ def parse_args():
         epilog="""Examples:
   %(prog)s --api-url http://localhost:8000/v1 --image-dir ./photos
   %(prog)s --api-url http://my-server:8000/v1 --image-dir ./photos --trigger sks
+  %(prog)s --api-url http://my-server:8000/v1 --image-dir ./photos --no-think
   %(prog)s --api-url http://my-server:8000/v1 --image-dir ./photos --force""",
     )
     parser.add_argument(
@@ -161,6 +184,12 @@ def parse_args():
         "Captions are written as .txt files in the same directory.",
     )
     parser.add_argument(
+        "--no-think",
+        action="store_true",
+        help="Disable thinking/reasoning for reasoning models (e.g. QwQ, Qwen3). "
+        "Passes enable_thinking=false via chat_template_kwargs.",
+    )
+    parser.add_argument(
         "--force",
         action="store_true",
         help="Overwrite existing caption files.",
@@ -173,8 +202,7 @@ def main():
 
     if not args.api_url:
         print("ERROR: --api-url is required (or set VLM_API_URL env var)", file=sys.stderr)
-        parser_help = "Run with --help for usage information."
-        print(parser_help, file=sys.stderr)
+        print("Run with --help for usage information.", file=sys.stderr)
         sys.exit(1)
 
     image_dir = args.image_dir.resolve()
@@ -192,18 +220,20 @@ def main():
         print(f"ERROR: No images found in {image_dir}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"Found {len(images)} images in {image_dir}")
-    print(f"Trigger word: {args.trigger}")
-    print(f"API: {args.api_url}")
+    # Create OpenAI client pointed at the vLLM endpoint
+    client = OpenAI(base_url=args.api_url, api_key="not-needed")
 
     # Auto-detect model name if not set
     model_name = args.model
     if not model_name:
-        model_name = detect_model_name(args.api_url)
-        print(f"Auto-detected model: {model_name}")
-    else:
-        print(f"Model: {model_name}")
+        model_name = detect_model_name(client)
 
+    print(f"Found {len(images)} images in {image_dir}")
+    print(f"Trigger word: {args.trigger}")
+    print(f"API: {args.api_url}")
+    print(f"Model: {model_name}")
+    if args.no_think:
+        print("Thinking: disabled")
     print()
 
     # Caption each image -- writes .txt alongside the image
@@ -221,7 +251,7 @@ def main():
 
         try:
             print(f"[{i}/{len(images)}] Captioning: {img_path.name} ... ", end="", flush=True)
-            caption = caption_image(args.api_url, model_name, img_path, args.trigger)
+            caption = caption_image(client, model_name, img_path, args.trigger, args.no_think)
             caption_path.write_text(caption, encoding="utf-8")
             print(f"OK ({len(caption)} chars)")
             success += 1

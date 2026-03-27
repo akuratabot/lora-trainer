@@ -5,7 +5,7 @@ generation with text-prompt control over pose, setting, and outfit.
 
 ## Prerequisites
 
-- Python 3.8+ (for the captioning script)
+- Python 3.8+ with `openai` package (`pip install openai`)
 - Access to an OpenAI-compatible VLM API (e.g. self-hosted vLLM)
 - K3s cluster with NVIDIA GPU node (GB10 / Blackwell)
 - NVIDIA device plugin and GPU drivers installed
@@ -44,13 +44,26 @@ Put all photos in a local directory (e.g. `./dataset/images/`).
 ### 1.2 Auto-Caption Images
 
 The captioning script calls your VLM API to generate a `.txt` caption file
-alongside each image. No dependencies beyond Python stdlib.
+alongside each image.
+
+```bash
+pip install openai  # one-time setup
+
+python scripts/caption.py \
+  --api-url http://your-vlm-server:8000/v1 \
+  --image-dir ./dataset/images \
+  --trigger ohwx
+```
+
+If you're using a reasoning model (QwQ, Qwen3, etc.), add `--no-think` to
+disable the thinking/reasoning step and get direct captions:
 
 ```bash
 python scripts/caption.py \
   --api-url http://your-vlm-server:8000/v1 \
   --image-dir ./dataset/images \
-  --trigger ohwx
+  --trigger ohwx \
+  --no-think
 ```
 
 Options:
@@ -58,6 +71,7 @@ Options:
 - `--image-dir` -- Directory containing your photos (default: `./dataset/images`)
 - `--trigger` -- Trigger word for the subject (default: `ohwx`)
 - `--model` -- Model name (auto-detected if not set)
+- `--no-think` -- Disable reasoning for thinking models (QwQ, Qwen3)
 - `--force` -- Overwrite existing captions
 
 After captioning, each image will have a matching `.txt` file:
