@@ -36,10 +36,6 @@ spec:
             - |
               set -euo pipefail
 
-              # Pre-create Triton cache dirs. TRITON_CACHE_DIR must exist
-              # before training starts or Triton raises RuntimeError.
-              mkdir -p /data/cache/triton/cache
-
               # Pull the training dataset
               echo "Downloading batch"
               curl -L \
@@ -87,18 +83,7 @@ spec:
               value: "INFO"
             - name: PYTORCH_CUDA_ALLOC_CONF
               value: "expandable_segments:True"
-            # Persist Triton compiled kernel cache and autotune results on
-            # the PVC. TRITON_CACHE_DIR redirects compiled .ptx/.cubin
-            # files. TRITON_CACHE_AUTOTUNING=1 enables autotune result
-            # persistence (off by default in Triton). TRITON_HOME sets
-            # the base dir used when TRITON_CACHE_DIR is not set - belt
-            # and suspenders so either path lands on the PVC.
-            - name: TRITON_HOME
-              value: "/data/cache"
-            - name: TRITON_CACHE_DIR
-              value: "/data/cache/triton/cache"
-            - name: TRITON_CACHE_AUTOTUNING
-              value: "1"
+
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
