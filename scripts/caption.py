@@ -114,7 +114,16 @@ def caption_image(api_url: str, model_name: str, image_path: Path, trigger_word:
 
     with urlopen(req, timeout=120) as resp:
         result = json.loads(resp.read().decode())
-        return result["choices"][0]["message"]["content"].strip()
+        choices = result.get("choices")
+        if not choices:
+            raise ValueError(f"API returned no choices: {json.dumps(result)[:200]}")
+        content = choices[0].get("message", {}).get("content")
+        if content is None:
+            raise ValueError(
+                f"API returned null content (possible refusal or empty response): "
+                f"{json.dumps(choices[0])[:200]}"
+            )
+        return content.strip()
 
 
 def parse_args():
