@@ -83,6 +83,11 @@ spec:
               value: "INFO"
             - name: PYTORCH_CUDA_ALLOC_CONF
               value: "expandable_segments:True"
+            # Persist Triton kernel autotune cache on the PVC so the
+            # hour-long first-run autotune on sm_100 Blackwell is not
+            # repeated every time the pod restarts.
+            - name: TRITON_CACHE_DIR
+              value: "/data/cache/triton"
           securityContext:
             allowPrivilegeEscalation: false
             runAsNonRoot: true
