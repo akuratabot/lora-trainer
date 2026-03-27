@@ -116,13 +116,16 @@ docker build -t your-registry/qwen-lora-training:latest .
 docker push your-registry/qwen-lora-training:latest
 ```
 
-Update the `image:` field in `k8s/train-job.yaml` (appears twice: initContainer and main container).
+Update the `image:` field in `k8s/train-job.yaml`.
 
-### 2.2 Create the PVC
+### 2.2 Apply K3s Resources
 
 ```bash
 kubectl apply -f k8s/pvc.yaml
+kubectl apply -f k8s/configmap.yaml
 ```
+
+To edit training config, update `k8s/configmap.yaml` and re-apply. No image rebuild needed.
 
 ### 2.3 Populate the PVC
 
@@ -138,7 +141,6 @@ kubectl exec pvc-helper -- mkdir -p \
   /data/models \
   /data/dataset/images \
   /data/dataset/regularization/images \
-  /data/config \
   /data/output \
   /data/cache
 
@@ -147,13 +149,6 @@ kubectl cp ./dataset/images/ pvc-helper:/data/dataset/images/
 
 # Copy regularization images
 kubectl cp ./dataset/regularization/images/ pvc-helper:/data/dataset/regularization/images/
-
-# Copy config files (optional -- the train Job's initContainer copies defaults
-# from the image if these don't exist on the PVC, but you can override here)
-kubectl cp config/config.json pvc-helper:/data/config/config.json
-kubectl cp config/config.env pvc-helper:/data/config/config.env
-kubectl cp config/multidatabackend.json pvc-helper:/data/config/multidatabackend.json
-kubectl cp config/user_prompt_library.json pvc-helper:/data/config/user_prompt_library.json
 ```
 
 ### Download the base model
