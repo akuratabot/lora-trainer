@@ -29,7 +29,7 @@ spec:
       # User can override by pre-populating /data/config/ on the PVC.
       initContainers:
         - name: init-config
-          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-3
+          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-4
           command:
             - sh
             - -c
@@ -71,7 +71,7 @@ spec:
               subPath: data
       containers:
         - name: train
-          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-3
+          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-4
           command: ["simpletuner", "train"]
           # SimpleTuner discovers config at ./config/config.json relative to workingDir
           workingDir: /data
@@ -133,3 +133,6 @@ spec:
         - name: shared-data
           persistentVolumeClaim:
             claimName: comfyui-data
+        - name: lora-config
+          configMap:
+            name: lora-training-config
