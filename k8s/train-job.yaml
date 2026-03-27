@@ -2,12 +2,15 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: lora-train
-  namespace: default
+  namespace: openclaw
 spec:
   backoffLimit: 1
   template:
     spec:
-      restartPolicy: OnFailure
+      imagePullSecrets:
+        - name: akurata-offsite-pull-bot
+      restartPolicy: Never
+      # restartPolicy: OnFailure
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -15,34 +18,71 @@ spec:
         fsGroup: 1000
         seccompProfile:
           type: RuntimeDefault
+      nodeSelector:
+        kubernetes.io/hostname: max
+      runtimeClassName: nvidia
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
       # Copy default configs from image to PVC if not already present.
       # User can override by pre-populating /data/config/ on the PVC.
       initContainers:
         - name: init-config
-          image: YOUR_REGISTRY/qwen-lora-training:latest # <-- replace
+          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-3
           command:
             - sh
             - -c
             - |
+              set -euo pipefail
+
               mkdir -p /data/config
+              mkdir -p /data/cache
               for f in config.json multidatabackend.json user_prompt_library.json config.env; do
-                if [ ! -f "/data/config/$f" ]; then
-                  echo "Copying default $f to /data/config/"
-                  cp "/app/config/$f" "/data/config/$f"
-                else
-                  echo "Using existing /data/config/$f"
-                fi
+                cp "/app/config/$f" "/data/config/$f"
+                # if [ ! -f "/data/config/$f" ]; then
+                #   echo "Copying default $f to /data/config/"
+                # else
+                #   echo "Using existing /data/config/$f"
+                # fi
               done
+
+              # Pull the training dataset
+              echo "Authenticating to file server"
+              TOKEN=$(curl -X POST \
+                -H "Content-Type: application/json" \
+                -d '{"username": "admin", "password": "admin"}' \
+                http://filebrowser.jellyfin.svc:8097/api/login)
+              echo "Downloading batch"
+              curl -L \
+                -H "X-Auth: $TOKEN" \
+                "http://filebrowser.jellyfin.svc:8097/api/raw/downloads/training/batch1.zip" \
+                -o "/data/batch1.zip"
+              unzip -n /data/batch1.zip -d /data/dataset/images
+              rm /data/batch1.zip
+
+              # Pull the regularization dataset
+              hf download bghira/pseudo-camera-10k \
+                --repo-type dataset \
+                --local-dir /data/dataset/regularization/images
+
+              # Pull the model weights
+              hf download Qwen/Qwen-Image-2512 \
+                --local-dir /data/models/Qwen-Image-2512
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
+          envFrom:
+            - secretRef:
+                name: hf-token
           volumeMounts:
-            - name: training-data
+            - name: train-data
               mountPath: /data
+              subPath: data
       containers:
         - name: train
-          image: YOUR_REGISTRY/qwen-lora-training:latest # <-- replace
+          image: us-east4-docker.pkg.dev/akurata-offsite/util/qwen-lora-trainer:2026.3.27-3
           command: ["simpletuner", "train"]
           # SimpleTuner discovers config at ./config/config.json relative to workingDir
           workingDir: /data
@@ -59,23 +99,30 @@ spec:
               value: "INFO"
             - name: PYTORCH_CUDA_ALLOC_CONF
               value: "expandable_segments:True"
-            # Uncomment if using HuggingFace Hub for model download:
-            # - name: HF_TOKEN
-            #   valueFrom:
-            #     secretKeyRef:
-            #       name: hf-token
-            #       key: token
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            capabilities:
+              drop:
+                - ALL
           volumeMounts:
-            - name: training-data
+            - name: train-data
               mountPath: /data
+              subPath: data
+            - name: shared-data
+              mountPath: /shared
+              subPath: data
+
           resources:
             requests:
-              memory: "120Gi"
               nvidia.com/gpu: "1"
             limits:
-              memory: "128Gi"
               nvidia.com/gpu: "1"
+
       volumes:
-        - name: training-data
+        - name: train-data
           persistentVolumeClaim:
-            claimName: lora-training-pvc
+            claimName: lora-training-cache
+        - name: shared-data
+          persistentVolumeClaim:
+            claimName: comfyui-data
