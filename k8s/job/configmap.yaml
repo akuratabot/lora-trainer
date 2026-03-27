@@ -43,7 +43,7 @@ data:
         "validation_lycoris_strength": 1.0,
         "validation_num_inference_steps": 20,
         "validation_prompt": "A photo of ohwx standing against a white background, natural lighting",
-        "validation_prompt_library": "/data/config/user_prompt_library.json",
+        "validation_prompt_library": true,
         "validation_negative_prompt": "ugly, cropped, blurry, low-quality, deformed, disfigured",
         "validation_resolution": "1024x1024",
         "validation_seed": 42,
