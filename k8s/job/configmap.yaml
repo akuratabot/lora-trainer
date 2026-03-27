@@ -47,7 +47,7 @@ data:
         "validation_negative_prompt": "ugly, cropped, blurry, low-quality, deformed, disfigured",
         "validation_resolution": "1024x1024",
         "validation_seed": 42,
-        "num_eval_images": 4,
+        "num_eval_images": 1,
         "report_to": "none",
         "tracker_project_name": "qwen-character-lora",
         "tracker_run_name": "ohwx-training",
@@ -56,7 +56,7 @@ data:
         "use_ema": false,
         "vae_batch_size": 1,
         "compress_disk_cache": false,
-        "disable_benchmark": true,
+        "disable_benchmark": false,
         "skip_file_discovery": false
     }
 
