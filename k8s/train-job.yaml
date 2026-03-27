@@ -113,6 +113,24 @@ spec:
               mountPath: /shared
               subPath: data
 
+            # Mount each config file individually so they land inside /data/config/
+            # without conflicting with PVC content at /data.
+            - name: lora-config
+              mountPath: /data/config/config.json
+              subPath: config.json
+              readOnly: true
+            - name: lora-config
+              mountPath: /data/config/multidatabackend.json
+              subPath: multidatabackend.json
+              readOnly: true
+            - name: lora-config
+              mountPath: /data/config/config.env
+              subPath: config.env
+              readOnly: true
+            - name: lora-config
+              mountPath: /data/config/user_prompt_library.json
+              subPath: user_prompt_library.json
+              readOnly: true
           resources:
             requests:
               nvidia.com/gpu: "1"

@@ -10,14 +10,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN pip install --no-cache-dir 'simpletuner[cuda13]' \
     --extra-index-url https://download.pytorch.org/whl/cu130
 
-# Copy default config files (used by initContainer to seed PVC)
-COPY config/ /app/config/
+# Patch SimpleTuner safety_check to handle nvidia-smi returning [N/A] for
+# unified memory GPUs (e.g. NVIDIA GB10 Grace Blackwell). The check is only
+# used to warn about the SOAP optimizer; we default to 128GB so no warning
+# fires and training proceeds normally.
+RUN sed -i \
+    's/total_memory = int(output.decode().strip()) \/ 1024/raw = output.decode().strip(); total_memory = (int(raw) if raw.lstrip("-").isdigit() else 131072) \/ 1024/' \
+    /usr/local/lib/python3.12/dist-packages/simpletuner/helpers/training/default_settings/safety_check.py
 
 # Create non-root user for restricted namespace compatibility.
 # All writes go to the PVC mounted at /data, so /workspace is just a fallback.
 RUN groupadd -g 1000 trainer && \
-    useradd -u 1000 -g 1000 -m -s /bin/bash trainer && \
-    chown -R 1000:1000 /app
+    useradd -u 1000 -g 1000 -m -s /bin/bash trainer
 USER 1000
 
 WORKDIR /workspace
