@@ -36,6 +36,11 @@ spec:
             - |
               set -euo pipefail
 
+              # Pre-create the Triton cache dir so Triton can write kernel
+              # autotune results. Triton silently skips caching if the
+              # directory does not already exist.
+              mkdir -p /data/cache/triton
+
               # Pull the training dataset
               echo "Downloading batch"
               curl -L \
