@@ -36,17 +36,6 @@ spec:
             - |
               set -euo pipefail
 
-              mkdir -p /data/config
-              mkdir -p /data/cache
-              for f in config.json multidatabackend.json user_prompt_library.json config.env; do
-                cp "/app/config/$f" "/data/config/$f"
-                # if [ ! -f "/data/config/$f" ]; then
-                #   echo "Copying default $f to /data/config/"
-                # else
-                #   echo "Using existing /data/config/$f"
-                # fi
-              done
-
               # Pull the training dataset
               echo "Authenticating to file server"
               TOKEN=$(curl -X POST \
