@@ -31,7 +31,7 @@ data:
         "minimum_image_size": 0,
         "caption_dropout_probability": 0.0,
         "data_backend_config": "/data/config/multidatabackend.json",
-        "output_dir": "/shared/comfyui/models/loras",
+        "output_dir": "/shared/comfyui/models/loras/qwen-batch1",
         "checkpoint_step_interval": 500,
         "checkpoints_total_limit": 5,
         "resume_from_checkpoint": "latest",

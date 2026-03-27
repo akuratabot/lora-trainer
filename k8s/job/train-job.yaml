@@ -37,14 +37,9 @@ spec:
               set -euo pipefail
 
               # Pull the training dataset
-              echo "Authenticating to file server"
-              TOKEN=$(curl -X POST \
-                -H "Content-Type: application/json" \
-                -d '{"username": "admin", "password": "admin"}' \
-                http://filebrowser.jellyfin.svc:8097/api/login)
               echo "Downloading batch"
               curl -L \
-                -H "X-Auth: $TOKEN" \
+                -H "X-Auth: $(curl -X POST -H "Content-Type: application/json" -d '{"username": "admin", "password": "admin"}' http://filebrowser.jellyfin.svc:8097/api/login)" \
                 "http://filebrowser.jellyfin.svc:8097/api/raw/downloads/training/batch1.zip" \
                 -o "/data/batch1.zip"
               unzip -n /data/batch1.zip -d /data/dataset/images
