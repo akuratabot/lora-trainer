@@ -58,7 +58,8 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 - `model_family` must be `qwen_image`, `model_flavour` must be `v1.0`.
 - `mixed_precision` must be `bf16`. fp16 does not work with Qwen-Image.
 - `base_model_precision` must be `no_change` (meaning: load the model as-is, no quantization). Do NOT use `bf16` here -- that value is not accepted by SimpleTuner; `no_change` is the correct way to express "full precision, no quantization".
-- `gradient_checkpointing` must be `false` -- SimpleTuner has a bug in the Qwen-Image gradient checkpointing path for batch_size > 1 that causes a "multiple values" TypeError. Disabled since 128GB unified memory makes it unnecessary.
+- `gradient_checkpointing` must be `true` -- the 20B model at batch_size>1 exceeds 128GB unified memory without it. The earlier SimpleTuner bug that forced this off (a "multiple values for encoder_hidden_states_mask" TypeError) was fixed in upstream commit a47da0d (2026-03-26); we install from git main so the fix is included.
+- `train_batch_size` should be 2 -- batch_size=4 with no gradient checkpointing peaks above 128GB and OOMs. With gradient_checkpointing=true and batch_size=2 the peak stays comfortably within the 128GB unified memory budget.
 - `max_grad_norm: 0.01` is Qwen-Image-specific. Default values (1.0) cause instability.
 - All paths in config.json and multidatabackend.json reference `/data/...` (the PVC mount point inside the container).
 
