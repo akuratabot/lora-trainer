@@ -3,7 +3,7 @@
     "model_flavour": "v1.0",
     "model_type": "lora",
     "pretrained_model_name_or_path": "/data/models/Qwen-Image-2512",
-    "base_model_precision": "bf16",
+    "base_model_precision": "no_change",
     "mixed_precision": "bf16",
     "lora_type": "standard",
     "lora_rank": 64,

@@ -54,7 +54,8 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 
 ### SimpleTuner Config
 - `model_family` must be `qwen_image`, `model_flavour` must be `v1.0`.
-- `mixed_precision` and `base_model_precision` must be `bf16`. fp16 does not work with Qwen-Image.
+- `mixed_precision` must be `bf16`. fp16 does not work with Qwen-Image.
+- `base_model_precision` must be `no_change` (meaning: load the model as-is, no quantization). Do NOT use `bf16` here -- that value is not accepted by SimpleTuner; `no_change` is the correct way to express "full precision, no quantization".
 - `noise_scheduler` must be `flowmatch`. Qwen-Image uses flow matching, not DDPM.
 - `max_grad_norm: 0.01` is Qwen-Image-specific. Default values (1.0) cause instability.
 - All paths in config.json and multidatabackend.json reference `/data/...` (the PVC mount point inside the container).
