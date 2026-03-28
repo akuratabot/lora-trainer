@@ -12,16 +12,13 @@ This repo provides a K3s-deployable training pipeline for character-specific LoR
 ## Repository Structure
 
 ```
-scripts/caption.py           # Local captioning script (NOT in the container image)
-config/config.json           # SimpleTuner training hyperparameters  \
-config/multidatabackend.json # SimpleTuner dataset backend config      | Source of
-config/user_prompt_library.json  # Validation prompts                  | truth for
-config/config.env            # SimpleTuner accelerate/env settings    /  configmap.yaml
-Dockerfile                   # Training-only container (NGC PyTorch 25.11 + SimpleTuner)
-k8s/pvc.yaml                 # PersistentVolumeClaim (130Gi, local-path)
-k8s/configmap.yaml           # ConfigMap: mounts all 4 config files into /data/config/ at runtime
-k8s/train-job.yaml           # K3s Job for SimpleTuner training
-GUIDE.md                     # Step-by-step usage guide
+scripts/caption.py               # Local captioning script (NOT in the container image)
+Dockerfile                       # Training-only container (NGC PyTorch 25.11 + SimpleTuner)
+k8s/pvc.yaml                     # PersistentVolumeClaim (150Gi, longhorn-ssd)
+k8s/job/configmap.yaml           # ConfigMap: all SimpleTuner config files (edit here to change training params)
+k8s/job/train-job.yaml           # K3s Job for SimpleTuner training
+Makefile                         # Build and push the container image
+GUIDE.md                         # Step-by-step usage guide
 ```
 
 ## Target Hardware
@@ -48,9 +45,9 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 - Does NOT include config files or `scripts/caption.py` -- configs are in the ConfigMap, captioning is local-only.
 
 ### K3s Manifests
-- `configmap.yaml` contains all 4 SimpleTuner config files as ConfigMap data. Edit this file to change training parameters -- no image rebuild needed.
-- `train-job.yaml` mounts the ConfigMap files into `/data/config/` via `subPath` volume mounts. There is no initContainer.
-- `train-job.yaml` runs under the `restricted` Pod Security Standard (non-root, drop all capabilities, seccomp RuntimeDefault).
+- `k8s/job/configmap.yaml` contains all SimpleTuner config files as ConfigMap data. Edit this file to change training parameters -- no image rebuild needed.
+- `k8s/job/train-job.yaml` mounts the ConfigMap files into `/data/config/` via `subPath` volume mounts. An initContainer downloads the training dataset and model weights.
+- `k8s/job/train-job.yaml` runs under the `restricted` Pod Security Standard (non-root, drop all capabilities, seccomp RuntimeDefault).
 - Training requires the full GPU and 128Gi memory. A co-located vLLM pod (40GB) must be scaled down before training starts.
 - `nvidia.com/gpu: 1` is the resource request. Do not change this.
 
@@ -66,13 +63,13 @@ The container base image MUST be `nvcr.io/nvidia/pytorch:25.11-py3` or equivalen
 ## Making Changes
 
 ### Modifying training parameters
-Edit the `config.json` key in `k8s/configmap.yaml`, then `kubectl apply -f k8s/configmap.yaml`. No image rebuild needed. Also keep `config/config.json` in sync -- it is the source of truth that `configmap.yaml` was generated from.
+Edit the `config.json` key in `k8s/job/configmap.yaml`, then `kubectl apply -f k8s/job/configmap.yaml`. No image rebuild needed.
 
 ### Modifying the dataset layout
-Edit the `multidatabackend.json` key in `k8s/configmap.yaml`. The subject images use `caption_strategy: "textfile"` (reads `.txt` files co-located with images). Regularization images use `caption_strategy: "instanceprompt"`.
+Edit the `multidatabackend.json` key in `k8s/job/configmap.yaml`. The subject images use `caption_strategy: "textfile"` (reads `.txt` files co-located with images).
 
 ### Modifying validation prompts
-Edit the `user_prompt_library.json` key in `k8s/configmap.yaml`. Keys are short names, values are full prompts. All should include the trigger word (`ohwx`).
+Edit the `user_prompt_library.json` key in `k8s/job/configmap.yaml`. Keys are short names, values are full prompts. All should include the trigger word (`ohwx`).
 
 ### Adding new K3s resources
 Place YAML files in `k8s/`. All pods must comply with the `restricted` Pod Security Standard: `runAsNonRoot`, `runAsUser: 1000`, `allowPrivilegeEscalation: false`, `capabilities.drop: ["ALL"]`, `seccompProfile: RuntimeDefault`.
@@ -80,14 +77,14 @@ Place YAML files in `k8s/`. All pods must comply with the `restricted` Pod Secur
 ## Testing
 
 - **caption.py**: Requires `pip install openai`. Test locally against any OpenAI-compatible vision API endpoint: `python scripts/caption.py --api-url <url> --image-dir <dir>`. For reasoning models (QwQ, Qwen3), add `--no-think`.
-- **JSON configs**: Validate with `python -c "import json; json.load(open('config/config.json'))"` (and similarly for the other JSON files).
-- **Dockerfile**: Build with `docker build .` (requires ARM64 host or buildx for cross-compilation). The NGC base image is ~15GB.
-- **K8s manifests**: Dry-run with `kubectl apply --dry-run=client -f k8s/train-job.yaml`.
+- **JSON configs**: Validate with `python -c "import json; json.load(open('k8s/job/configmap.yaml'))"` -- or use `make validate` if defined. Each JSON block inside the ConfigMap can be extracted and parsed individually.
+- **Dockerfile**: Build with `make build` (requires ARM64 host or buildx for cross-compilation). The NGC base image is ~15GB.
+- **K8s manifests**: Dry-run with `kubectl apply --dry-run=client -f k8s/job/train-job.yaml`.
 
 ## Do NOT
 
 - Deploy or run training from this dev environment. Build and test only.
 - Change the base image without confirming ARM64 + Blackwell + CUDA 13.0.x compatibility.
 - Add heavy dependencies to `scripts/caption.py` (only `openai` is allowed as an external dep).
-- Remove the non-root user from the Dockerfile or the security contexts from `train-job.yaml`.
+- Remove the non-root user from the Dockerfile or the security contexts from `k8s/job/train-job.yaml`.
 - Hardcode HuggingFace tokens or secrets into any file. Use K8s Secrets or env vars.

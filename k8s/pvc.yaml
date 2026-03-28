@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: lora-training-pvc
+  name: lora-training-cache
   namespace: openclaw
 spec:
   accessModes:
