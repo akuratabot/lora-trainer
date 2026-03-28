@@ -57,7 +57,7 @@ data:
         "use_ema": false,
         "vae_batch_size": 1,
         "compress_disk_cache": false,
-        "attention_mechanism": "flash3",
+        "attention_mechanism": "flash-attn-3",
         "disable_benchmark": false,
         "skip_file_discovery": false
     }
