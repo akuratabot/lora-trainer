@@ -93,13 +93,6 @@ data:
         }
     ]
 
-  config.env: |
-    export TRAINING_NUM_PROCESSES=1
-    export TRAINING_NUM_MACHINES=1
-    export TRAINING_DYNAMO_BACKEND=no
-    export MIXED_PRECISION=bf16
-    export SIMPLETUNER_LOG_LEVEL=INFO
-
   user_prompt_library.json: |
     {
         "identity_check": "A photo of ohwx standing against a plain white background, arms at sides, looking directly at the camera, neutral expression, soft even studio lighting",
