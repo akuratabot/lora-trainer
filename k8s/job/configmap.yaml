@@ -100,7 +100,7 @@ data:
             "metadata_backend": "discovery",
             "repeats": 0,
             "is_regularisation_data": true,
-            "disabled": false,
+            "disabled": true,
             "skip_file_discovery": ""
         },
         {
